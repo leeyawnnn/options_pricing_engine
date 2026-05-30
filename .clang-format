@@ -1,0 +1,14 @@
+# Based on the Google C++ style with two project-specific overrides:
+#   * 4-space indentation (instead of Google's 2)
+#   * 100-column limit (instead of Google's 80)
+---
+Language: Cpp
+BasedOnStyle: Google
+IndentWidth: 4
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+ColumnLimit: 100
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Regroup
+SortIncludes: CaseSensitive
