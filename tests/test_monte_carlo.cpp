@@ -1,12 +1,11 @@
 // Unit tests for the Monte Carlo pricer and its variance-reduction variants.
-#include "opt/monte_carlo.hpp"
-
 #include <gtest/gtest.h>
 
 #include <cmath>
 
 #include "opt/black_scholes.hpp"
 #include "opt/market_data.hpp"
+#include "opt/monte_carlo.hpp"
 #include "opt/option.hpp"
 
 namespace {

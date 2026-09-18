@@ -19,18 +19,18 @@ enum class VarianceReduction {
 /// Knobs for a Monte Carlo pricing run. Defaults are deterministic so test
 /// results are reproducible.
 struct McSettings {
-    std::size_t num_paths = 100'000;        ///< Terminal-price evaluations.
-    std::uint64_t seed = 0x5DEECE66DULL;    ///< Seed for the mt19937_64 engine.
+    std::size_t num_paths = 100'000;      ///< Terminal-price evaluations.
+    std::uint64_t seed = 0x5DEECE66DULL;  ///< Seed for the mt19937_64 engine.
     VarianceReduction variance_reduction = VarianceReduction::None;
 };
 
 /// Outcome of a Monte Carlo pricing run, including a 95% confidence interval.
 struct McResult {
-    double price;          ///< Point estimate of the option value.
-    double std_error;      ///< Standard error of the estimate.
-    double ci_low;         ///< Lower bound of the 95% confidence interval.
-    double ci_high;        ///< Upper bound of the 95% confidence interval.
-    std::size_t samples;   ///< Number of independent samples averaged.
+    double price;         ///< Point estimate of the option value.
+    double std_error;     ///< Standard error of the estimate.
+    double ci_low;        ///< Lower bound of the 95% confidence interval.
+    double ci_high;       ///< Upper bound of the 95% confidence interval.
+    std::size_t samples;  ///< Number of independent samples averaged.
 };
 
 /// Price a European-style option by simulating terminal underlying prices under

@@ -1,6 +1,4 @@
 // Unit tests for the vectorised Black-Scholes pricing grid.
-#include "opt/pricing_grid.hpp"
-
 #include <gtest/gtest.h>
 
 #include <Eigen/Core>
@@ -8,6 +6,7 @@
 #include "opt/black_scholes.hpp"
 #include "opt/market_data.hpp"
 #include "opt/option.hpp"
+#include "opt/pricing_grid.hpp"
 
 namespace {
 
@@ -33,7 +32,8 @@ TEST(PriceGrid, CellsMatchScalarBlackScholes) {
     const Eigen::VectorXd spots = Eigen::VectorXd::LinSpaced(5, 80.0, 120.0);
     const Eigen::VectorXd strikes = Eigen::VectorXd::LinSpaced(5, 80.0, 120.0);
     const double expiry = 0.75;
-    const Eigen::MatrixXd grid = opt::price_grid(kBase, spots, strikes, expiry, opt::OptionType::Call);
+    const Eigen::MatrixXd grid =
+        opt::price_grid(kBase, spots, strikes, expiry, opt::OptionType::Call);
 
     for (Eigen::Index i = 0; i < spots.size(); ++i) {
         opt::MarketData m = kBase;

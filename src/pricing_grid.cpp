@@ -48,14 +48,12 @@ Eigen::MatrixXd price_grid(const MarketData& base, const Eigen::VectorXd& spots,
     // One vectorised pass down the spot axis per strike column.
     for (Eigen::Index j = 0; j < num_strikes; ++j) {
         const double strike = strikes(j);
-        const Eigen::ArrayXd d1 =
-            (log_spot - std::log(strike) + drift) / std_dev + 0.5 * std_dev;
+        const Eigen::ArrayXd d1 = (log_spot - std::log(strike) + drift) / std_dev + 0.5 * std_dev;
         const Eigen::ArrayXd d2 = d1 - std_dev;
         const double pv_strike = strike * disc_r;
         // Unified call/put: sign = +1 prices a call, -1 a put.
-        out.col(j) = (sign * (forward * normal_cdf(sign * d1) -
-                              pv_strike * normal_cdf(sign * d2)))
-                         .matrix();
+        out.col(j) =
+            (sign * (forward * normal_cdf(sign * d1) - pv_strike * normal_cdf(sign * d2))).matrix();
     }
     return out;
 }

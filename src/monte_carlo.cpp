@@ -101,7 +101,8 @@ McResult monte_carlo_price(const Option& option, const MarketData& market,
     }
 
     const double std_error = std::sqrt(estimator_variance / static_cast<double>(samples));
-    return McResult{price, std_error, price - kZ975 * std_error, price + kZ975 * std_error, samples};
+    return McResult{price, std_error, price - kZ975 * std_error, price + kZ975 * std_error,
+                    samples};
 }
 
 }  // namespace opt

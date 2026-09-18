@@ -1,11 +1,10 @@
 // Unit tests for the Cox-Ross-Rubinstein binomial tree pricer.
-#include "opt/binomial_tree.hpp"
-
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <stdexcept>
 
+#include "opt/binomial_tree.hpp"
 #include "opt/black_scholes.hpp"
 #include "opt/market_data.hpp"
 #include "opt/option.hpp"

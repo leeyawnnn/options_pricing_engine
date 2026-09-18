@@ -1,11 +1,10 @@
 // Loop-vs-vectorised pricing benchmark using a hand-rolled steady_clock timer
 // (no external benchmark dependency). Reports best-of-N wall time, throughput
 // in options/second, and the speedup of the Eigen grid over the scalar loop.
+#include <Eigen/Core>
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
-
-#include <Eigen/Core>
 
 #include "opt/market_data.hpp"
 #include "opt/option.hpp"
@@ -40,9 +39,10 @@ int main() {
     const double expiry = 1.0;
     double sink = 0.0;
 
-    std::printf("%-12s %14s %14s %10s %16s %16s\n", "grid", "scalar (ms)", "eigen (ms)",
-                "speedup", "scalar opt/s", "eigen opt/s");
-    std::printf("--------------------------------------------------------------------------------\n");
+    std::printf("%-12s %14s %14s %10s %16s %16s\n", "grid", "scalar (ms)", "eigen (ms)", "speedup",
+                "scalar opt/s", "eigen opt/s");
+    std::printf(
+        "--------------------------------------------------------------------------------\n");
 
     for (const int dim : {100, 250, 500, 1000}) {
         const Eigen::VectorXd spots = Eigen::VectorXd::LinSpaced(dim, 50.0, 150.0);

@@ -1,10 +1,9 @@
 // Unit tests for the analytical and finite-difference Black-Scholes Greeks.
-#include "opt/greeks.hpp"
-
 #include <gtest/gtest.h>
 
 #include <cmath>
 
+#include "opt/greeks.hpp"
 #include "opt/market_data.hpp"
 #include "opt/option.hpp"
 

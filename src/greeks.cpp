@@ -48,9 +48,8 @@ namespace {
     if (t.degenerate) {
         return 0.0;
     }
-    const double decay =
-        -(market.spot * t.disc_q * standard_normal_pdf(t.d1) * market.volatility) /
-        (2.0 * std::sqrt(expiry));
+    const double decay = -(market.spot * t.disc_q * standard_normal_pdf(t.d1) * market.volatility) /
+                         (2.0 * std::sqrt(expiry));
     if (type == OptionType::Call) {
         return decay - market.rate * t.pv_strike * cumulative_normal(t.d2) +
                market.dividend * t.forward * cumulative_normal(t.d1);

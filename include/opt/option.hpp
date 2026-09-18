@@ -41,9 +41,7 @@ public:
     [[nodiscard]] bool is_call() const noexcept { return type() == OptionType::Call; }
 
     /// True for American exercise, false for European.
-    [[nodiscard]] bool is_american() const noexcept {
-        return exercise() == Exercise::American;
-    }
+    [[nodiscard]] bool is_american() const noexcept { return exercise() == Exercise::American; }
 
     /// Intrinsic value (the immediate-exercise payoff) for a given underlying
     /// price: \f$\max(S-K,0)\f$ for a call, \f$\max(K-S,0)\f$ for a put.

@@ -1,11 +1,10 @@
 // Unit tests for the standard normal helpers and Black-Scholes pricing.
-#include "opt/black_scholes.hpp"
-
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <random>
 
+#include "opt/black_scholes.hpp"
 #include "opt/market_data.hpp"
 #include "opt/normal_distribution.hpp"
 
@@ -97,10 +96,10 @@ TEST(BlackScholes, ZeroVolatilityEqualsPresentValueOfCertainPayoff) {
     const double forward = 100.0 * std::exp(-0.02 * expiry);
     const double pv_strike = strike * std::exp(-0.05 * expiry);
 
-    EXPECT_NEAR(opt::black_scholes_call(mkt, strike, expiry),
-                std::max(forward - pv_strike, 0.0), 1e-12);
-    EXPECT_NEAR(opt::black_scholes_put(mkt, strike, expiry),
-                std::max(pv_strike - forward, 0.0), 1e-12);
+    EXPECT_NEAR(opt::black_scholes_call(mkt, strike, expiry), std::max(forward - pv_strike, 0.0),
+                1e-12);
+    EXPECT_NEAR(opt::black_scholes_put(mkt, strike, expiry), std::max(pv_strike - forward, 0.0),
+                1e-12);
 
     // A deep out-of-the-money call must clamp to zero, not go negative.
     EXPECT_DOUBLE_EQ(opt::black_scholes_call(mkt, 1000.0, expiry), 0.0);
