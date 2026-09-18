@@ -41,26 +41,59 @@ else()
 endif()
 
 # ------------------------------------------------------------------------------
-# Dependencies via FetchContent
+# Options
+# ------------------------------------------------------------------------------
+option(OPT_OFFLINE "Require system-installed dependencies; never access the network" OFF)
+option(OPT_BUILD_TESTS "Build the GoogleTest suite" ON)
+
+# ------------------------------------------------------------------------------
+# Dependencies
+#
+# Policy: use a system-installed copy when one is present, otherwise download a
+# pinned release tarball verified by SHA256. Tarballs (not `git clone`) keep the
+# build hermetic and reproducible; the hashes below were computed by downloading
+# each archive and are checked by CMake on every fresh configure.
+#
+# With -DOPT_OFFLINE=ON the FetchContent fallback is disabled entirely and a
+# missing dependency is a hard configure error, so the build makes no network
+# access at all.
 # ------------------------------------------------------------------------------
 include(FetchContent)
 
-# Eigen (header-only linear algebra).
-FetchContent_Declare(
-    Eigen3
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG 3.4.0
-    GIT_SHALLOW TRUE)
-# We only need the headers; skip Eigen's own tests/blas/etc.
-set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(EIGEN_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(Eigen3)
+# --- Eigen (header-only linear algebra) ---------------------------------------
+# Eigen is hosted on GitLab and publishes no GitHub mirror, so the tarball URL
+# points at gitlab.com. Environments that cannot reach GitLab should install
+# Eigen from their package manager and configure with -DOPT_OFFLINE=ON.
+set(OPT_EIGEN_VERSION 3.4.0)
+find_package(Eigen3 ${OPT_EIGEN_VERSION} QUIET NO_MODULE)
+if(NOT Eigen3_FOUND)
+    if(OPT_OFFLINE)
+        message(
+            FATAL_ERROR
+                "OPT_OFFLINE=ON but Eigen3 >= ${OPT_EIGEN_VERSION} was not found. "
+                "Install it (apt: libeigen3-dev, brew: eigen, vcpkg: eigen3) or "
+                "point CMAKE_PREFIX_PATH at an existing installation.")
+    endif()
+    message(STATUS "Eigen3 not found on the system; fetching ${OPT_EIGEN_VERSION} tarball")
+    # We only need the headers; skip Eigen's own tests/blas/etc.
+    set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(EIGEN_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        Eigen3
+        URL https://gitlab.com/libeigen/eigen/-/archive/${OPT_EIGEN_VERSION}/eigen-${OPT_EIGEN_VERSION}.tar.gz
+        URL_HASH
+            SHA256=8586084f71f9bde545ee7fa6d00288b264a2b7ac3607b974e54d13e7162c1c72
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(Eigen3)
+else()
+    message(STATUS "Using system Eigen3 ${Eigen3_VERSION}")
+endif()
 
 # Treat Eigen's headers as system headers so our -Werror policy never fires on
 # them (Eigen is not -Wpedantic-clean and that is not our concern). Eigen3::Eigen
-# is an ALIAS, so resolve the real target before setting properties on it.
+# may be an ALIAS, so resolve the real target before setting properties on it.
 get_target_property(_eigen_target Eigen3::Eigen ALIASED_TARGET)
 if(NOT _eigen_target)
     set(_eigen_target Eigen3::Eigen)
@@ -71,15 +104,48 @@ if(_eigen_includes)
         INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_eigen_includes}")
 endif()
 
-# GoogleTest.
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0
-    GIT_SHALLOW TRUE)
-# Honour our shared CRT on Windows.
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+# --- GoogleTest ---------------------------------------------------------------
+set(OPT_GTEST_VERSION 1.14.0)
+if(OPT_BUILD_TESTS)
+    find_package(GTest ${OPT_GTEST_VERSION} QUIET)
+    if(NOT GTest_FOUND)
+        if(OPT_OFFLINE)
+            message(
+                FATAL_ERROR
+                    "OPT_OFFLINE=ON but GoogleTest >= ${OPT_GTEST_VERSION} was not found. "
+                    "Install it (apt: libgtest-dev, brew: googletest, vcpkg: gtest) or "
+                    "reconfigure with -DOPT_BUILD_TESTS=OFF.")
+        endif()
+        message(STATUS "GoogleTest not found on the system; fetching ${OPT_GTEST_VERSION} tarball")
+        # Honour our shared CRT on Windows.
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            googletest
+            URL https://github.com/google/googletest/archive/refs/tags/v${OPT_GTEST_VERSION}.tar.gz
+            URL_HASH
+                SHA256=8ad598c73ad796e0d8280b082cebd82a630d73e73cd3c70057938a6501bba5d7
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+        FetchContent_MakeAvailable(googletest)
+    else()
+        message(STATUS "Using system GoogleTest ${GTest_VERSION}")
+    endif()
+
+    # Same reasoning as Eigen: GoogleTest's headers are not warning-clean under
+    # our -Werror policy, and third-party diagnostics are not ours to fix.
+    foreach(_gtest_target GTest::gtest GTest::gtest_main)
+        if(TARGET ${_gtest_target})
+            get_target_property(_resolved ${_gtest_target} ALIASED_TARGET)
+            if(NOT _resolved)
+                set(_resolved ${_gtest_target})
+            endif()
+            get_target_property(_gtest_includes ${_resolved} INTERFACE_INCLUDE_DIRECTORIES)
+            if(_gtest_includes)
+                set_target_properties(${_resolved} PROPERTIES
+                    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_gtest_includes}")
+            endif()
+        endif()
+    endforeach()
+endif()
 
 # ------------------------------------------------------------------------------
 # Core library: opt_lib
@@ -106,19 +172,23 @@ target_link_libraries(price_cli PRIVATE opt_lib opt_warnings)
 # Tests: opt_tests
 # ------------------------------------------------------------------------------
 enable_testing()
-include(GoogleTest)
 
-add_executable(
-    opt_tests
-    tests/test_option.cpp
-    tests/test_black_scholes.cpp
-    tests/test_binomial.cpp
-    tests/test_monte_carlo.cpp
-    tests/test_greeks.cpp
-    tests/test_pricing_grid.cpp)
+if(OPT_BUILD_TESTS)
+    include(GoogleTest)
 
-target_link_libraries(opt_tests PRIVATE opt_lib GTest::gtest_main opt_warnings)
-gtest_discover_tests(opt_tests)
+    add_executable(
+        opt_tests
+        tests/test_option.cpp
+        tests/test_black_scholes.cpp
+        tests/test_binomial.cpp
+        tests/test_monte_carlo.cpp
+        tests/test_greeks.cpp
+        tests/test_pricing_grid.cpp)
+
+    target_link_libraries(opt_tests PRIVATE opt_lib GTest::gtest_main opt_warnings)
+    # A unit test that needs more than a few seconds has hung, not slowed down.
+    gtest_discover_tests(opt_tests PROPERTIES TIMEOUT 60)
+endif()
 
 # ------------------------------------------------------------------------------
 # Benchmarks: opt_bench (hand-rolled timer, no external dependency)
