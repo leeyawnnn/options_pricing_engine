@@ -1,0 +1,81 @@
+# Checks are opt-in by family rather than wildcard-on-then-suppress, so the list
+# below is the whole policy and nothing fires that is not named here.
+#
+# Deliberately excluded and why:
+#   * fuchsia-*, llvmlibc-*, altera-*  -- vendor house styles, not general advice.
+#   * cppcoreguidelines-avoid-magic-numbers / readability-magic-numbers --
+#     closed-form pricing formulas are made of named mathematical constants;
+#     hoisting 0.5 out of `d1 - 0.5 * sigma^2 * T` obscures the formula.
+#   * modernize-use-trailing-return-type -- the codebase uses leading returns.
+#   * cppcoreguidelines-pro-bounds-pointer-arithmetic -- argv parsing in the CLI.
+#   * cppcoreguidelines-pro-type-vararg -- std::printf is the right tool for the
+#     column-aligned numeric tables the CLI and benchmark emit; iostream
+#     manipulators would be strictly less readable for the same output.
+#   * performance-enum-size -- would force a std::uint8_t underlying type onto
+#     public API enums to save three bytes that are never stored in bulk.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  cert-*,
+  -cert-err58-cpp,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-pro-type-vararg,
+  misc-*,
+  -misc-non-private-member-variables-in-classes,
+  -misc-include-cleaner,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  performance-*,
+  -performance-enum-size,
+  portability-*,
+  readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length
+
+WarningsAsErrors: '*'
+
+# Only diagnose our own code; dependency headers pulled in by FetchContent and
+# the system toolchain are not ours to fix.
+HeaderFilterRegex: '.*/(include/opt|src|apps|benchmarks)/[^/]+\.hpp$'
+
+CheckOptions:
+  # Match the naming conventions already used across the codebase.
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: _
+  - key: readability-identifier-naming.ConstexprVariableCase
+    value: CamelCase
+  - key: readability-identifier-naming.ConstexprVariablePrefix
+    value: k
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.GlobalConstantPrefix
+    value: k
+  - key: readability-identifier-naming.StaticConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.StaticConstantPrefix
+    value: k
+  - key: readability-function-cognitive-complexity.Threshold
+    value: '40'
