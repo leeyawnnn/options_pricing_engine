@@ -45,6 +45,31 @@ struct Greeks {
 [[nodiscard]] double bs_rho(const MarketData& market, double strike, double expiry,
                             OptionType type) noexcept;
 
+/// Analytical vanna, \f$\partial^2 V/\partial S\,\partial\sigma =
+/// -e^{-qT}\phi(d_1)\,d_2/\sigma\f$.
+///
+/// Vanna is the same object read two ways: the sensitivity of delta to a change
+/// in volatility, and the sensitivity of vega to a change in spot. It is what a
+/// vol desk quotes as the risk-reversal exposure of a position -- it is the
+/// Greek that tells you how a skew move re-hedges you -- and it changes sign
+/// through the money, so a book that is vanna-flat at one spot is not at
+/// another. Identical for calls and puts, hence no OptionType parameter.
+///
+/// Units follow @ref Greeks::vega: per unit volatility.
+[[nodiscard]] double bs_vanna(const MarketData& market, double strike, double expiry) noexcept;
+
+/// Analytical volga (also called vomma), \f$\partial^2 V/\partial\sigma^2 =
+/// \mathrm{vega}\cdot d_1 d_2/\sigma\f$.
+///
+/// Volga is the convexity of the position in volatility, and it is why a
+/// vega-neutral book still makes or loses money when vol moves: vega itself is
+/// not constant. It is smallest at the money (where \f$d_1 d_2 < 0\f$, so volga
+/// is actually negative for a near-ATM option) and largest in the wings, which
+/// is the analytical reason a butterfly is a long-vol-of-vol position.
+///
+/// Units: per unit volatility squared. Identical for calls and puts.
+[[nodiscard]] double bs_volga(const MarketData& market, double strike, double expiry) noexcept;
+
 /// All five analytical Greeks, sharing a single evaluation of the
 /// Black-Scholes intermediate terms.
 [[nodiscard]] Greeks bs_greeks(const MarketData& market, double strike, double expiry,

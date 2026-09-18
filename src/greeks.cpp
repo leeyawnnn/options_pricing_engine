@@ -69,6 +69,24 @@ namespace {
     return -strike * expiry * t.disc_r * cumulative_normal(-t.d2);
 }
 
+[[nodiscard]] double vanna_from(const MarketData& market, const detail::BsTerms& t) noexcept {
+    if (t.degenerate) {
+        return 0.0;
+    }
+    // vanna = d(vega)/dS = -e^{-qT} phi(d1) d2 / sigma. No explicit sqrt(T)
+    // appears: the maturity dependence is already carried by d1 and d2.
+    return -t.disc_q * standard_normal_pdf(t.d1) * t.d2 / market.volatility;
+}
+
+[[nodiscard]] double volga_from(const MarketData& market, double expiry,
+                                const detail::BsTerms& t) noexcept {
+    if (t.degenerate) {
+        return 0.0;
+    }
+    // volga = d(vega)/dsigma = vega * d1 * d2 / sigma.
+    return vega_from(market, expiry, t) * t.d1 * t.d2 / market.volatility;
+}
+
 }  // namespace
 
 double bs_delta(const MarketData& market, double strike, double expiry, OptionType type) noexcept {
@@ -89,6 +107,14 @@ double bs_theta(const MarketData& market, double strike, double expiry, OptionTy
 
 double bs_rho(const MarketData& market, double strike, double expiry, OptionType type) noexcept {
     return rho_from(strike, expiry, detail::compute_terms(market, strike, expiry), type);
+}
+
+double bs_vanna(const MarketData& market, double strike, double expiry) noexcept {
+    return vanna_from(market, detail::compute_terms(market, strike, expiry));
+}
+
+double bs_volga(const MarketData& market, double strike, double expiry) noexcept {
+    return volga_from(market, expiry, detail::compute_terms(market, strike, expiry));
 }
 
 Greeks bs_greeks(const MarketData& market, double strike, double expiry, OptionType type) noexcept {

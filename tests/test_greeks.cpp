@@ -92,3 +92,104 @@ TEST(Greeks, GammaAndVegaIdenticalForCallAndPut) {
 }
 
 }  // namespace
+
+// -----------------------------------------------------------------------------
+// Second-order cross Greeks
+// -----------------------------------------------------------------------------
+
+namespace {
+
+// Central finite difference of an arbitrary Greek in one market variable.
+template <typename Fn>
+[[nodiscard]] double central_difference(const opt::MarketData& market, double step,
+                                        double opt::MarketData::*field, const Fn& greek) {
+    opt::MarketData up = market;
+    opt::MarketData down = market;
+    up.*field = market.*field + step;
+    down.*field = market.*field - step;
+    return (greek(up) - greek(down)) / (2.0 * step);
+}
+
+}  // namespace
+
+// Vanna is d(delta)/d(sigma) and d(vega)/d(spot) at once. Checking it against
+// both finite differences, rather than one, is what makes the test meaningful:
+// a sign error would pass one and fail the other.
+TEST(Greeks, VannaMatchesBothOfItsFiniteDifferences) {
+    for (const double spot : {70.0, 100.0, 130.0}) {
+        for (const double vol : {0.12, 0.25, 0.60}) {
+            for (const double expiry : {0.25, 1.0, 2.5}) {
+                const opt::MarketData market{spot, 0.04, 0.02, vol};
+                const double analytic = opt::bs_vanna(market, 100.0, expiry);
+
+                for (const opt::OptionType type : {opt::OptionType::Call, opt::OptionType::Put}) {
+                    const double d_delta_d_vol = central_difference(
+                        market, 1e-5, &opt::MarketData::volatility, [&](const opt::MarketData& m) {
+                            return opt::bs_delta(m, 100.0, expiry, type);
+                        });
+                    EXPECT_NEAR(analytic, d_delta_d_vol, 1e-6)
+                        << "S=" << spot << " vol=" << vol << " T=" << expiry;
+                }
+
+                const double d_vega_d_spot = central_difference(
+                    market, spot * 1e-5, &opt::MarketData::spot,
+                    [&](const opt::MarketData& m) { return opt::bs_vega(m, 100.0, expiry); });
+                EXPECT_NEAR(analytic, d_vega_d_spot, 1e-6)
+                    << "S=" << spot << " vol=" << vol << " T=" << expiry;
+            }
+        }
+    }
+}
+
+TEST(Greeks, VolgaMatchesFiniteDifferenceOfVega) {
+    for (const double spot : {70.0, 100.0, 130.0}) {
+        for (const double vol : {0.12, 0.25, 0.60}) {
+            for (const double expiry : {0.25, 1.0, 2.5}) {
+                const opt::MarketData market{spot, 0.04, 0.02, vol};
+                const double analytic = opt::bs_volga(market, 100.0, expiry);
+                const double numeric = central_difference(
+                    market, 1e-5, &opt::MarketData::volatility,
+                    [&](const opt::MarketData& m) { return opt::bs_vega(m, 100.0, expiry); });
+                EXPECT_NEAR(analytic, numeric, 1e-4 * std::max(std::abs(analytic), 1.0))
+                    << "S=" << spot << " vol=" << vol << " T=" << expiry;
+            }
+        }
+    }
+}
+
+// Volga is negative near the money (where d1 and d2 straddle zero) and positive
+// in both wings. That sign flip is the analytical statement of why a butterfly
+// is long vol-of-vol, so it is worth pinning down rather than only checking a
+// finite difference.
+TEST(Greeks, VolgaChangesSignThroughTheMoney) {
+    const opt::MarketData market{100.0, 0.0, 0.0, 0.20};
+    EXPECT_LT(opt::bs_volga(market, 100.0, 1.0), 0.0);
+    EXPECT_GT(opt::bs_volga(market, 60.0, 1.0), 0.0);
+    EXPECT_GT(opt::bs_volga(market, 170.0, 1.0), 0.0);
+}
+
+// Vanna carries the sign of -d2, so it is positive for a strike above the
+// forward and negative below it. Read through delta: more volatility pulls
+// every call's delta towards 0.5, which means *up* for an out-of-the-money call
+// and *down* for an in-the-money one.
+TEST(Greeks, VannaChangesSignThroughTheForward) {
+    const opt::MarketData market{100.0, 0.0, 0.0, 0.20};
+    EXPECT_GT(opt::bs_vanna(market, 130.0, 1.0), 0.0);
+    EXPECT_LT(opt::bs_vanna(market, 75.0, 1.0), 0.0);
+
+    // The crossing is where d2 = 0, i.e. K = F exp(-sigma^2 T / 2), which sits
+    // slightly *below* the forward rather than on it.
+    const double zero_vanna_strike = 100.0 * std::exp(-0.5 * 0.20 * 0.20 * 1.0);
+    EXPECT_NEAR(opt::bs_vanna(market, zero_vanna_strike, 1.0), 0.0, 1e-12);
+}
+
+// Both vanish where there is no uncertainty left to be second-order about.
+TEST(Greeks, SecondOrderGreeksVanishInDegenerateLimits) {
+    const opt::MarketData zero_vol{100.0, 0.04, 0.0, 0.0};
+    EXPECT_DOUBLE_EQ(opt::bs_vanna(zero_vol, 100.0, 1.0), 0.0);
+    EXPECT_DOUBLE_EQ(opt::bs_volga(zero_vol, 100.0, 1.0), 0.0);
+
+    const opt::MarketData market{100.0, 0.04, 0.0, 0.20};
+    EXPECT_DOUBLE_EQ(opt::bs_vanna(market, 100.0, 0.0), 0.0);
+    EXPECT_DOUBLE_EQ(opt::bs_volga(market, 100.0, 0.0), 0.0);
+}
