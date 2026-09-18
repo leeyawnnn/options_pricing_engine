@@ -1,0 +1,173 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Third-party actions are pinned to commit SHAs, not floating tags: a tag can be
+# moved, and a moved tag in CI silently changes what runs against every push.
+env:
+  # FetchContent's download/extract tree lives outside the build directory so it
+  # can be cached independently of the compiler matrix.
+  FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.deps
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build and test across OS x compiler x build type.
+  # ---------------------------------------------------------------------------
+  build:
+    name: ${{ matrix.os }} / ${{ matrix.compiler }} / ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        compiler: [gcc, clang]
+        build_type: [Debug, Release]
+        exclude:
+          # `gcc` on a GitHub macOS runner is a shim in front of Apple Clang, so
+          # that cell would duplicate the clang cell rather than test anything.
+          - os: macos-latest
+            compiler: gcc
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.FETCHCONTENT_BASE_DIR }}
+          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Select compiler
+        run: |
+          if [ "${{ matrix.compiler }}" = "gcc" ]; then
+            echo "CC=gcc"  >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          else
+            echo "CC=clang"  >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --timeout 120
+
+      - name: Smoke-test the CLI
+        run: |
+          ./build/bin/price_cli --spot 100 --strike 100 --rate 0.05 \
+            --vol 0.2 --expiry 1 --type call --method bs
+
+  # ---------------------------------------------------------------------------
+  # Sanitizers. Separate jobs because ASan/UBSan and TSan cannot be combined.
+  # ---------------------------------------------------------------------------
+  sanitize:
+    name: sanitize (${{ matrix.sanitizer }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address-undefined, thread]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.FETCHCONTENT_BASE_DIR }}
+          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          if [ "${{ matrix.sanitizer }}" = "thread" ]; then
+            FLAGS="-fsanitize=thread -g -O1"
+          else
+            FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -g -O1"
+          fi
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="$FLAGS" -DCMAKE_EXE_LINKER_FLAGS="$FLAGS"
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Test
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          ASAN_OPTIONS: detect_leaks=1
+        run: ctest --test-dir build --output-on-failure --timeout 300
+
+  # ---------------------------------------------------------------------------
+  # An OPT_OFFLINE build must configure and compile with zero network access.
+  # ---------------------------------------------------------------------------
+  offline-build:
+    name: offline build (system deps only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install system Eigen
+        run: sudo apt-get update && sudo apt-get install -y libeigen3-dev
+
+      # OPT_BUILD_TESTS=OFF because Ubuntu's libgtest-dev does not advertise a
+      # version to find_package, which an OPT_OFFLINE configure treats as a hard
+      # error by design. The library, CLI, report tool and benchmark all build.
+      - name: Configure offline
+        run: cmake -B build -DOPT_OFFLINE=ON -DOPT_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+
+      - name: Assert nothing was downloaded
+        run: test ! -d "$FETCHCONTENT_BASE_DIR"
+
+      - name: Build
+        run: cmake --build build -j
+
+  # ---------------------------------------------------------------------------
+  # Formatting.
+  # ---------------------------------------------------------------------------
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format-18
+      - name: Check formatting
+        run: |
+          git ls-files '*.cpp' '*.hpp' | xargs clang-format-18 --dry-run --Werror
+
+  # ---------------------------------------------------------------------------
+  # Static analysis against the committed .clang-tidy.
+  # ---------------------------------------------------------------------------
+  clang-tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.FETCHCONTENT_BASE_DIR }}
+          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Install clang-tidy
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy-18
+
+      # A configure step is needed only for compile_commands.json; the analysis
+      # itself reads the sources.
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Analyse
+        run: |
+          git ls-files 'src/*.cpp' 'apps/*.cpp' 'benchmarks/*.cpp' \
+            | xargs clang-tidy-18 -p build --quiet --warnings-as-errors='*'
