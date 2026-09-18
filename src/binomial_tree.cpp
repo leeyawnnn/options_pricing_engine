@@ -7,6 +7,42 @@
 #include <vector>
 
 namespace opt {
+namespace {
+
+// Zero volatility collapses the lattice: u = e^{0} = 1, d = 1/u = 1, and the
+// risk-neutral probability (growth - d)/(u - d) is 0/0. The CRR recursion
+// cannot be evaluated there, so the degenerate case is priced directly.
+//
+// With sigma = 0 the underlying is deterministic, S_t = S_0 e^{(r-q)t}, so a
+// European option is worth the discounted payoff of that single path. An
+// American option is worth the best discounted payoff available on the exercise
+// grid, which is not the same thing: a deep in-the-money put is worth exercising
+// immediately rather than waiting for the forward to drift further away.
+//
+// The exercise grid is deliberately the same n*dt grid the stochastic path
+// uses, so the two branches agree in the sigma -> 0 limit instead of jumping.
+[[nodiscard]] double deterministic_price(const Option& option, const MarketData& market,
+                                         int steps) noexcept {
+    const double expiry = option.expiry();
+    const double drift = market.rate - market.dividend;
+    const double dt = expiry / steps;
+
+    double value = 0.0;
+    for (int step = steps; step >= 0; --step) {
+        const double time = dt * step;
+        const double spot = market.spot * std::exp(drift * time);
+        const double exercise = std::exp(-market.rate * time) * option.payoff(spot);
+        if (step == steps) {
+            value = exercise;
+        } else if (option.is_american()) {
+            value = std::max(value, exercise);
+        }
+    }
+    // `value` is a present value already (every term carries e^{-r t}).
+    return value;
+}
+
+}  // namespace
 
 double binomial_price(const Option& option, const MarketData& market, int steps) {
     if (steps < 1) {
@@ -17,6 +53,9 @@ double binomial_price(const Option& option, const MarketData& market, int steps)
     const double spot = market.spot;
     if (expiry <= 0.0) {
         return option.payoff(spot);  // already expired: value is the intrinsic payoff
+    }
+    if (!(market.volatility > 0.0)) {
+        return deterministic_price(option, market, steps);
     }
 
     const double dt = expiry / steps;
