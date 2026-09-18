@@ -38,9 +38,9 @@ struct Config {
     opt::OptionType type = opt::OptionType::Call;
     opt::Exercise exercise = opt::Exercise::European;
     Method method = Method::BlackScholes;
-    int steps = 1000;                                            // tree
-    std::size_t paths = 100'000;                                 // Monte Carlo
-    std::uint64_t seed = 0x5DEECE66DULL;                         // Monte Carlo
+    int steps = 1000;                     // tree
+    std::size_t paths = 100'000;          // Monte Carlo
+    std::uint64_t seed = 0x5DEECE66DULL;  // Monte Carlo
     opt::VarianceReduction variates = opt::VarianceReduction::AntitheticAndControl;
 };
 
@@ -91,37 +91,62 @@ void print_usage(std::ostream& os) {
 }
 
 [[nodiscard]] opt::OptionType parse_type(const std::string& v) {
-    if (v == "call") return opt::OptionType::Call;
-    if (v == "put") return opt::OptionType::Put;
+    if (v == "call") {
+        return opt::OptionType::Call;
+    }
+    if (v == "put") {
+        return opt::OptionType::Put;
+    }
     throw std::runtime_error("--type must be 'call' or 'put', got '" + v + "'");
 }
 
 [[nodiscard]] opt::Exercise parse_exercise(const std::string& v) {
-    if (v == "european") return opt::Exercise::European;
-    if (v == "american") return opt::Exercise::American;
+    if (v == "european") {
+        return opt::Exercise::European;
+    }
+    if (v == "american") {
+        return opt::Exercise::American;
+    }
     throw std::runtime_error("--exercise must be 'european' or 'american', got '" + v + "'");
 }
 
 [[nodiscard]] Method parse_method(const std::string& v) {
-    if (v == "bs") return Method::BlackScholes;
-    if (v == "tree") return Method::Tree;
-    if (v == "mc") return Method::MonteCarlo;
+    if (v == "bs") {
+        return Method::BlackScholes;
+    }
+    if (v == "tree") {
+        return Method::Tree;
+    }
+    if (v == "mc") {
+        return Method::MonteCarlo;
+    }
     throw std::runtime_error("--method must be 'bs', 'tree' or 'mc', got '" + v + "'");
 }
 
 [[nodiscard]] opt::VarianceReduction parse_variates(const std::string& v) {
-    if (v == "none") return opt::VarianceReduction::None;
-    if (v == "antithetic") return opt::VarianceReduction::Antithetic;
-    if (v == "control") return opt::VarianceReduction::ControlVariate;
-    if (v == "both") return opt::VarianceReduction::AntitheticAndControl;
+    if (v == "none") {
+        return opt::VarianceReduction::None;
+    }
+    if (v == "antithetic") {
+        return opt::VarianceReduction::Antithetic;
+    }
+    if (v == "control") {
+        return opt::VarianceReduction::ControlVariate;
+    }
+    if (v == "both") {
+        return opt::VarianceReduction::AntitheticAndControl;
+    }
     throw std::runtime_error("--variates must be none|antithetic|control|both, got '" + v + "'");
 }
 
 // Parses argv into a Config. Returns false (after printing usage) when --help
 // was requested; throws std::runtime_error on a malformed command line.
 [[nodiscard]] bool parse_args(int argc, char** argv, Config& cfg) {
-    bool have_spot = false, have_strike = false, have_rate = false;
-    bool have_vol = false, have_expiry = false;
+    bool have_spot = false;
+    bool have_strike = false;
+    bool have_rate = false;
+    bool have_vol = false;
+    bool have_expiry = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string flag = argv[i];
@@ -136,58 +161,100 @@ void print_usage(std::ostream& os) {
             return argv[++i];
         };
 
-        if (flag == "--spot") { cfg.spot = to_double(flag, value()); have_spot = true; }
-        else if (flag == "--strike") { cfg.strike = to_double(flag, value()); have_strike = true; }
-        else if (flag == "--rate") { cfg.rate = to_double(flag, value()); have_rate = true; }
-        else if (flag == "--vol") { cfg.volatility = to_double(flag, value()); have_vol = true; }
-        else if (flag == "--expiry") { cfg.expiry = to_double(flag, value()); have_expiry = true; }
-        else if (flag == "--dividend") { cfg.dividend = to_double(flag, value()); }
-        else if (flag == "--type") { cfg.type = parse_type(value()); }
-        else if (flag == "--exercise") { cfg.exercise = parse_exercise(value()); }
-        else if (flag == "--method") { cfg.method = parse_method(value()); }
-        else if (flag == "--steps") { cfg.steps = static_cast<int>(to_int(flag, value())); }
-        else if (flag == "--paths") { cfg.paths = static_cast<std::size_t>(to_int(flag, value())); }
-        else if (flag == "--seed") { cfg.seed = static_cast<std::uint64_t>(to_int(flag, value())); }
-        else if (flag == "--variates") { cfg.variates = parse_variates(value()); }
-        else { throw std::runtime_error("unknown flag: " + flag); }
+        if (flag == "--spot") {
+            cfg.spot = to_double(flag, value());
+            have_spot = true;
+        } else if (flag == "--strike") {
+            cfg.strike = to_double(flag, value());
+            have_strike = true;
+        } else if (flag == "--rate") {
+            cfg.rate = to_double(flag, value());
+            have_rate = true;
+        } else if (flag == "--vol") {
+            cfg.volatility = to_double(flag, value());
+            have_vol = true;
+        } else if (flag == "--expiry") {
+            cfg.expiry = to_double(flag, value());
+            have_expiry = true;
+        } else if (flag == "--dividend") {
+            cfg.dividend = to_double(flag, value());
+        } else if (flag == "--type") {
+            cfg.type = parse_type(value());
+        } else if (flag == "--exercise") {
+            cfg.exercise = parse_exercise(value());
+        } else if (flag == "--method") {
+            cfg.method = parse_method(value());
+        } else if (flag == "--steps") {
+            cfg.steps = static_cast<int>(to_int(flag, value()));
+        } else if (flag == "--paths") {
+            cfg.paths = static_cast<std::size_t>(to_int(flag, value()));
+        } else if (flag == "--seed") {
+            cfg.seed = static_cast<std::uint64_t>(to_int(flag, value()));
+        } else if (flag == "--variates") {
+            cfg.variates = parse_variates(value());
+        } else {
+            throw std::runtime_error("unknown flag: " + flag);
+        }
     }
 
     if (!(have_spot && have_strike && have_rate && have_vol && have_expiry)) {
-        throw std::runtime_error("missing required flag(s); need --spot --strike --rate --vol --expiry");
+        throw std::runtime_error(
+            "missing required flag(s); need --spot --strike --rate --vol --expiry");
     }
-    if (cfg.spot <= 0.0) throw std::runtime_error("--spot must be > 0");
-    if (cfg.strike <= 0.0) throw std::runtime_error("--strike must be > 0");
-    if (cfg.volatility < 0.0) throw std::runtime_error("--vol must be >= 0");
-    if (cfg.expiry < 0.0) throw std::runtime_error("--expiry must be >= 0");
-    if (cfg.method == Method::Tree && cfg.steps < 1) throw std::runtime_error("--steps must be >= 1");
+    if (cfg.spot <= 0.0) {
+        throw std::runtime_error("--spot must be > 0");
+    }
+    if (cfg.strike <= 0.0) {
+        throw std::runtime_error("--strike must be > 0");
+    }
+    if (cfg.volatility < 0.0) {
+        throw std::runtime_error("--vol must be >= 0");
+    }
+    if (cfg.expiry < 0.0) {
+        throw std::runtime_error("--expiry must be >= 0");
+    }
+    if (cfg.method == Method::Tree && cfg.steps < 1) {
+        throw std::runtime_error("--steps must be >= 1");
+    }
     return true;
 }
 
 [[nodiscard]] std::unique_ptr<opt::Option> make_option(const Config& cfg) {
     const bool call = cfg.type == opt::OptionType::Call;
     if (cfg.exercise == opt::Exercise::American) {
-        if (call) return std::make_unique<opt::AmericanCall>(cfg.strike, cfg.expiry);
+        if (call) {
+            return std::make_unique<opt::AmericanCall>(cfg.strike, cfg.expiry);
+        }
         return std::make_unique<opt::AmericanPut>(cfg.strike, cfg.expiry);
     }
-    if (call) return std::make_unique<opt::EuropeanCall>(cfg.strike, cfg.expiry);
+    if (call) {
+        return std::make_unique<opt::EuropeanCall>(cfg.strike, cfg.expiry);
+    }
     return std::make_unique<opt::EuropeanPut>(cfg.strike, cfg.expiry);
 }
 
 const char* method_name(Method m) {
     switch (m) {
-        case Method::BlackScholes: return "Black-Scholes (analytical)";
-        case Method::Tree: return "CRR binomial tree";
-        case Method::MonteCarlo: return "Monte Carlo";
+        case Method::BlackScholes:
+            return "Black-Scholes (analytical)";
+        case Method::Tree:
+            return "CRR binomial tree";
+        case Method::MonteCarlo:
+            return "Monte Carlo";
     }
     return "unknown";
 }
 
 const char* variates_name(opt::VarianceReduction v) {
     switch (v) {
-        case opt::VarianceReduction::None: return "none";
-        case opt::VarianceReduction::Antithetic: return "antithetic";
-        case opt::VarianceReduction::ControlVariate: return "control";
-        case opt::VarianceReduction::AntitheticAndControl: return "antithetic+control";
+        case opt::VarianceReduction::None:
+            return "none";
+        case opt::VarianceReduction::Antithetic:
+            return "antithetic";
+        case opt::VarianceReduction::ControlVariate:
+            return "control";
+        case opt::VarianceReduction::AntitheticAndControl:
+            return "antithetic+control";
     }
     return "unknown";
 }
@@ -231,8 +298,8 @@ void run(const Config& cfg) {
         std::cout << mc.price << '\n'
                   << "  Std error   : " << mc.std_error << '\n'
                   << "  95% CI      : [" << mc.ci_low << ", " << mc.ci_high << "]\n"
-                  << "  Paths       : " << mc.samples << "  (variates: "
-                  << variates_name(cfg.variates) << ")\n";
+                  << "  Paths       : " << mc.samples
+                  << "  (variates: " << variates_name(cfg.variates) << ")\n";
     }
 
     std::cout << "\nGreeks (Black-Scholes analytical):\n"

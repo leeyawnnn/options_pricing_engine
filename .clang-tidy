@@ -65,10 +65,6 @@ CheckOptions:
     value: lower_case
   - key: readability-identifier-naming.PrivateMemberSuffix
     value: _
-  - key: readability-identifier-naming.ConstexprVariableCase
-    value: CamelCase
-  - key: readability-identifier-naming.ConstexprVariablePrefix
-    value: k
   - key: readability-identifier-naming.GlobalConstantCase
     value: CamelCase
   - key: readability-identifier-naming.GlobalConstantPrefix
@@ -77,5 +73,9 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.StaticConstantPrefix
     value: k
+  # Note: ConstexprVariable* is deliberately left unset so that file-scope
+  # constants fall through to GlobalConstant (kCamelCase) while function-local
+  # ones fall through to Variable (lower_case). That is the convention the code
+  # already follows: kZ975 at namespace scope, inv_sqrt_2pi inside a function.
   - key: readability-function-cognitive-complexity.Threshold
     value: '40'

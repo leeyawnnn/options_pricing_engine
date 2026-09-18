@@ -13,10 +13,15 @@
 
 namespace {
 
+// Each grid size is timed this many times and the fastest run is reported, on
+// the usual benchmarking argument that the minimum is the least contaminated by
+// scheduler noise and competing load.
+constexpr int kRepeats = 5;
+
 // Runs `fn` `repeats` times and returns the fastest elapsed time in seconds.
 // `sink` accumulates a value from each run so the optimiser cannot elide it.
 template <typename Fn>
-double best_time(int repeats, double& sink, Fn&& fn) {
+double best_time(int repeats, double& sink, const Fn& fn) {
     double best = 1e300;
     for (int r = 0; r < repeats; ++r) {
         const auto start = std::chrono::steady_clock::now();
@@ -33,7 +38,6 @@ double best_time(int repeats, double& sink, Fn&& fn) {
 int main() {
     const opt::MarketData base{/*spot ignored=*/0.0, 0.05, 0.02, 0.20};
     const double expiry = 1.0;
-    constexpr int kRepeats = 5;
     double sink = 0.0;
 
     std::printf("%-12s %14s %14s %10s %16s %16s\n", "grid", "scalar (ms)", "eigen (ms)",

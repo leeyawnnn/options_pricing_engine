@@ -15,9 +15,16 @@ namespace {
 // ---------------------------------------------------------------------------
 
 [[nodiscard]] double delta_from(const detail::BsTerms& t, OptionType type) noexcept {
+    // In the degenerate limit the option is a forward contract that either
+    // finishes in the money or does not, so N(d1) collapses to a step.
+    const double n_d1 = [&] {
+        if (!t.degenerate) {
+            return cumulative_normal(t.d1);
+        }
+        return t.forward > t.pv_strike ? 1.0 : 0.0;
+    }();
+    const double call_delta = t.disc_q * n_d1;
     // put delta = call delta - e^{-qT} (differentiate put-call parity in S).
-    const double call_delta =
-        t.disc_q * (t.degenerate ? (t.forward > t.pv_strike ? 1.0 : 0.0) : cumulative_normal(t.d1));
     return type == OptionType::Call ? call_delta : call_delta - t.disc_q;
 }
 
