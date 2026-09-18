@@ -183,7 +183,8 @@ if(OPT_BUILD_TESTS)
         tests/test_binomial.cpp
         tests/test_monte_carlo.cpp
         tests/test_greeks.cpp
-        tests/test_pricing_grid.cpp)
+        tests/test_pricing_grid.cpp
+        tests/test_no_arbitrage.cpp)
 
     target_link_libraries(opt_tests PRIVATE opt_lib GTest::gtest_main opt_warnings)
     # A unit test that needs more than a few seconds has hung, not slowed down.
