@@ -29,3 +29,15 @@ _deps/
 
 # macOS
 .DS_Store
+
+# Python tooling (figure pipeline, data fetchers)
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Debug symbol bundles
+*.dSYM/

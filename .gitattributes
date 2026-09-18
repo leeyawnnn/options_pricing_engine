@@ -1,0 +1,12 @@
+# Normalise line endings for text sources.
+* text=auto eol=lf
+
+# Committed market-data snapshots and generated analysis artifacts are data,
+# not hand-written source: keep them out of GitHub's language statistics.
+data/**            linguist-vendored
+reports/data/**    linguist-generated
+reports/figures/** linguist-generated
+
+# Figures are generated SVG/PNG; do not diff them as text.
+*.svg -diff
+*.gif binary

@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "options-pricing-engine"
+abstract: >-
+  A C++20 options pricing library providing Black-Scholes-Merton closed-form
+  prices and Greeks, Cox-Ross-Rubinstein binomial lattices, Monte Carlo with
+  variance reduction, Longstaff-Schwartz least-squares Monte Carlo for American
+  exercise, and implied-volatility inversion against real option chains.
+type: software
+authors:
+  - family-names: "Lie"
+    given-names: "Lyonn"
+    alias: "leeyawnnn"
+repository-code: "https://github.com/leeyawnnn/options-pricing-engine"
+license: Apache-2.0
+keywords:
+  - options-pricing
+  - black-scholes
+  - monte-carlo
+  - implied-volatility
+  - quantitative-finance
+  - cpp20
