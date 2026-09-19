@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include "opt/binomial_tree.hpp"
@@ -121,19 +122,88 @@ TEST(BinomialTree, ZeroVolatilityAmericanPutExercisesImmediately) {
 
 // The deterministic branch has to join up with the stochastic one, not sit
 // beside it: the lattice price must approach the zero-vol value as vol shrinks.
-TEST(BinomialTree, PriceIsContinuousAsVolatilityApproachesZero) {
-    const opt::AmericanPut american{125.0, 0.8};
+//
+// This cannot be tested by driving vol to zero at a fixed step count. A CRR
+// lattice needs sigma >= |r-q| sqrt(T/N) to keep its risk-neutral probability
+// in [0, 1], and binomial_price refuses the regime below that -- see
+// RejectsVolatilityBelowTheCrrStabilityFloor. So the approach is tested over
+// the range where the lattice is a lattice.
+//
+// The option is struck at the forward, which makes the zero-vol price exactly
+// zero: every cent of the lattice price is then time value, the quantity that
+// has to vanish with sigma. It is an American call on an underlying yielding
+// less than the rate, so early exercise is never optimal and the value is a
+// smooth function of sigma rather than one pinned by an exercise boundary --
+// which is what the old deep-in-the-money put was, making this test vacuous.
+TEST(BinomialTree, PriceApproachesTheZeroVolatilityLimit) {
+    constexpr int kSteps = 400;
+    constexpr double kExpiry = 0.8;
     opt::MarketData market{100.0, 0.05, 0.01, 0.0};
-    const double limit_value = opt::binomial_price(american, market, 400);
+    const double forward = market.spot * std::exp((market.rate - market.dividend) * kExpiry);
+    const opt::AmericanCall call{forward, kExpiry};
 
-    double previous_gap = 1e9;
-    for (const double vol : {1e-2, 1e-3, 1e-4, 1e-5}) {
+    const double limit_value = opt::binomial_price(call, market, kSteps);
+    ASSERT_NEAR(limit_value, 0.0, 1e-12);
+
+    double previous_gap = std::numeric_limits<double>::infinity();
+    double previous_vol = 0.0;
+    for (const double vol : {0.2, 0.1, 0.05, 0.02, 0.01}) {
         market.volatility = vol;
-        const double gap = std::abs(opt::binomial_price(american, market, 400) - limit_value);
+        const double gap = std::abs(opt::binomial_price(call, market, kSteps) - limit_value);
         EXPECT_LT(gap, previous_gap) << "vol=" << vol;
+        if (previous_vol > 0.0) {
+            // Time value is linear in sigma to leading order, so halving sigma
+            // has to halve the gap. This is the statement that the gap really
+            // is heading for zero, rather than merely decreasing.
+            EXPECT_NEAR(gap / previous_gap, vol / previous_vol, 0.02) << "vol=" << vol;
+        }
         previous_gap = gap;
+        previous_vol = vol;
     }
-    EXPECT_LT(previous_gap, 1e-6);
+}
+
+// Below the CRR stability floor the risk-neutral probability leaves [0, 1] and
+// the rollback stops being an expectation -- one branch carries a negative
+// weight. It does not fail loudly: it silently returned 0.000 for an
+// at-the-forward call worth 0.035. A refused answer beats a wrong one.
+TEST(BinomialTree, RejectsVolatilityBelowTheCrrStabilityFloor) {
+    constexpr int kSteps = 400;
+    constexpr double kExpiry = 0.8;
+    opt::MarketData market{100.0, 0.05, 0.01, 0.0};
+    const double forward = market.spot * std::exp((market.rate - market.dividend) * kExpiry);
+    const opt::AmericanCall call{forward, kExpiry};
+
+    const double floor_vol = std::abs(market.rate - market.dividend) * std::sqrt(kExpiry / kSteps);
+
+    market.volatility = floor_vol * 1.01;
+    EXPECT_NO_THROW((void)opt::binomial_price(call, market, kSteps));
+
+    market.volatility = floor_vol * 0.99;
+    EXPECT_THROW((void)opt::binomial_price(call, market, kSteps), std::invalid_argument);
+
+    // The floor falls as the tree is refined, so the same quote becomes
+    // priceable with more steps -- which is what the message tells the caller
+    // to do. N must grow as 1/sigma^2 for that, hence the jump.
+    EXPECT_NO_THROW((void)opt::binomial_price(call, market, 4 * kSteps));
+}
+
+// The lattice's spot ladder spans S * e^{+/- sigma sqrt(T) sqrt(N)}. Once that
+// exponent passes exp's range the top of the ladder is +inf and the bottom is
+// 0, and the rollback turns either into a confident number: an infinite
+// terminal payoff propagates all the way down, and a ladder built by
+// multiplying up from an underflowed base is zero everywhere, pricing a
+// valuable call at nothing. Both were silent, so the regime is refused instead.
+TEST(BinomialTree, RejectsLatticesThatLeaveDoublesRange) {
+    const opt::MarketData market{100.0, 0.05, 0.01, 25.0};
+    const opt::EuropeanCall call{100.0, 1.0};
+
+    // 25 * sqrt(256) = 400 is inside the range; 25 * sqrt(1024) = 800 is not.
+    double priced = 0.0;
+    EXPECT_NO_THROW(priced = opt::binomial_price(call, market, 256));
+    EXPECT_TRUE(std::isfinite(priced));
+    EXPECT_NEAR(priced, opt::black_scholes_call(market, call.strike(), call.expiry()), 1e-6);
+
+    EXPECT_THROW((void)opt::binomial_price(call, market, 1024), std::invalid_argument);
 }
 
 TEST(BinomialTree, ZeroVolatilityPricesAreFinite) {
