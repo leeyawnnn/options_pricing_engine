@@ -96,6 +96,7 @@ the engineering, and the numerical agreement all hold up at the same time.**
 | CRR binomial tree | ✅ | ✅ | (price) | `O(N)` memory backward induction |
 | Monte Carlo (GBM terminal) | ✅ | — | (price) | antithetic + control variates, 95% CI |
 | Vectorised grid | ✅ | — | — | Eigen/SIMD, ~3.6× over a scalar loop |
+| Implied volatility | ✅ | ✅ | (vega) | safeguarded Newton + Brent, inverts BS or the lattice |
 
 - **Three cross-validated engines** — analytical, lattice, and simulation agree
   to within their expected error on every test case.
@@ -108,6 +109,10 @@ the engineering, and the numerical agreement all hold up at the same time.**
   variate cut MC variance ~28× on the worked example.
 - **Vectorised pricing grid** — an Eigen/SIMD CDF prices a whole surface without
   a scalar `libm` call, ~3.6× faster than a per-cell loop.
+- **Implied volatility, both models** — safeguarded Newton (bisecting whenever a
+  step escapes the bracket) with a Brent fallback where vega collapses, against
+  either the closed form or the American lattice. Every quote that has no
+  implied volatility is named as such rather than answered.
 - **Engineered like production** — `-Wall -Wextra -Wpedantic -Werror`,
   dependencies fetched (not vendored), and a one-command test + benchmark flow.
 
@@ -194,14 +199,54 @@ Monte Carlo confidence interval brackets it.
 | Binomial tree (5000 steps) | **10.450184** | error ≈ 4e-4, consistent with `O(1/N)` |
 | Monte Carlo (10⁶ paths) | **10.454014** | std err 0.00274, 95% CI **[10.4486, 10.4594]** ✓ brackets BS |
 
+### Worked example — implied volatility
+
+Running the same call backwards: hand the price back to the engine and ask what
+volatility produces it.
+
+```sh
+./build/bin/price_cli --spot 100 --strike 100 --rate 0.05 --implied-vol 10.450584 \
+                      --expiry 1 --type call --method bs
+```
+
+```
+Implied vol   : 0.200000
+  Vega        : 37.524035   (per 1.00 vol)
+  Residual    : 0.000000   (model - market)
+  Solver      : newton, 4 iterations
+  Sensitivity : a 0.01 quote error moves the implied vol by 0.026650 vol points
+```
+
+The vega line is the point of the exercise. It converts a quote error into a
+volatility error, so it says whether the number means anything: a converged
+inversion with a vega of `1e-6` is arithmetically correct and economically
+meaningless, and the solver reports it rather than letting it pass as a data
+point on a smile.
+
+Listed equity options are American, so inverting their quotes with Black-Scholes
+inverts the wrong model — it prices away the early-exercise premium and calls
+the difference volatility. The same put quoted at `6.50`:
+
+| Model inverted | Implied vol |
+|----------------|-------------|
+| Black-Scholes | 22.46% |
+| CRR lattice, American (2000 steps) | 21.09% |
+
+A 1.37 vol point gap on an at-the-money one-year put — far wider than the spread
+it would be quoted in.
+
 ### CLI flags
 
 ```
---spot --strike --rate --vol --expiry        (required)
+--spot --strike --rate --expiry              (required)
+--vol σ | --implied-vol P                    (required, exactly one)
 --dividend --type call|put --exercise european|american
 --method bs|tree|mc --steps N --paths N --seed N
 --variates none|antithetic|control|both
 ```
+
+`--vol` prices the option; `--implied-vol` takes a market price and solves for
+the volatility that reproduces it (`--method bs` or `tree`).
 
 ### Library use
 
@@ -261,6 +306,9 @@ volatility `σ`, time to expiry `T`, standard normal pdf/cdf `φ`/`Φ`.
 | Rho | `K T e^{−rT} Φ(d₂)` (call) | `bs_rho` |
 | CRR lattice | `u = e^{σ√Δt}`, `d = 1/u`, `p = (e^{(r−q)Δt} − d)/(u − d)` | `binomial_price` |
 | GBM terminal | `S_T = S₀ exp((r−q−½σ²)T + σ√T·Z)`, `Z∼N(0,1)` | `monte_carlo_price` |
+| CRR stability floor | `σ ≥ \|r−q\|√(T/N)`, so that `p ∈ [0,1]` | `binomial_price` |
+| Implied volatility | solve `V_model(σ) = V_market` for `σ` | `implied_volatility` |
+| Initial guess | `σ₀ ≈ √(2π/T)·(C − intrinsic)/(S e^{−qT})` | `brenner_subrahmanyam_guess` |
 
 Full derivations are in the Doxygen comments on each public header.
 
@@ -284,8 +332,20 @@ apps/          the price_cli demo
   accurate enough for *prices* can still be too rough for *Greeks*, because the
   Greeks differentiate it. `Φ(x) = ½·erfc(−x/√2)` is accurate to ~1e-16, which
   keeps analytical and finite-difference Greeks consistent.
-- **`O(N)` tree.** A single `std::vector<double>` is rolled back in place rather
-  than materialising the full `O(N²)` lattice.
+- **`O(N)` tree.** A single `std::vector<double>` of prices is rolled back in
+  place rather than materialising the full `O(N²)` lattice, alongside one
+  precomputed ladder of the `2N+1` distinct node spots.
+- **The lattice refuses what it cannot price.** A CRR tree is only a valid
+  discretisation while its risk-neutral probability stays in `[0,1]`, which
+  requires `σ ≥ |r−q|√(T/N)`; below that the rollback quietly stops being an
+  expectation and returns a number anyway. It is also representable only while
+  its spot ladder, spanning `S·e^{±σ√T·√N}`, stays inside double's range. Both
+  boundaries throw rather than return, and the implied-volatility solver
+  brackets inside them rather than walking off either end.
+- **The inversion reports its own conditioning.** `implied_volatility` returns
+  vega alongside the answer, and a status enum that distinguishes a quote below
+  intrinsic from one above the no-arbitrage ceiling from a genuine solver
+  failure — because on a real option chain those are not the same problem.
 - **Variance reduction.** Antithetic variates and an asset-price control variate
   (with its analytically-known forward mean) cut the Monte Carlo variance ~28×
   on the worked example.
@@ -302,7 +362,9 @@ apps/          the price_cli demo
   structured to grow full-path simulation).
 - **American Greeks** by finite differencing the lattice, and **Longstaff-
   Schwartz** least-squares Monte Carlo for early exercise.
-- **Implied volatility** solving (Newton / Brent).
+- **Volatility surface construction** on top of the implied-volatility solver:
+  chain-wide inversion, arbitrage-free smile fitting, and term-structure
+  interpolation.
 
 ---
 
