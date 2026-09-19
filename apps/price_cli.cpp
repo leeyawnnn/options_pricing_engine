@@ -1,10 +1,8 @@
 // price_cli -- command-line front-end to the pricing engine.
 //
-// Examples:
-//   price_cli --spot 100 --strike 105 --rate 0.05 --vol 0.2 --expiry 1.0 \
-//             --type call --method bs
-//   price_cli --spot 100 --strike 105 --rate 0.05 --implied-vol 8.02 \
-//             --expiry 1.0 --type call --method bs
+// Examples, pricing then inverting the same contract:
+//   price_cli --spot 100 --strike 105 --rate 0.05 --vol 0.2 --expiry 1 --method bs
+//   price_cli --spot 100 --strike 105 --rate 0.05 --implied-vol 8.02 --expiry 1 --method bs
 //
 // The tool runs in one of two directions. Given --vol it prices the option;
 // given --implied-vol it takes a market price and solves for the volatility
