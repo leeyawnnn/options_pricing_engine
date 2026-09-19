@@ -156,6 +156,7 @@ add_library(
     src/binomial_tree.cpp
     src/monte_carlo.cpp
     src/greeks.cpp
+    src/implied_volatility.cpp
     src/pricing_grid.cpp)
 
 target_include_directories(opt_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -184,7 +185,8 @@ if(OPT_BUILD_TESTS)
         tests/test_monte_carlo.cpp
         tests/test_greeks.cpp
         tests/test_pricing_grid.cpp
-        tests/test_no_arbitrage.cpp)
+        tests/test_no_arbitrage.cpp
+        tests/test_implied_volatility.cpp)
 
     target_link_libraries(opt_tests PRIVATE opt_lib GTest::gtest_main opt_warnings)
     # A unit test that needs more than a few seconds has hung, not slowed down.

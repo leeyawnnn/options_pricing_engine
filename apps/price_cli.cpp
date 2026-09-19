@@ -1,13 +1,19 @@
 // price_cli -- command-line front-end to the pricing engine.
 //
-// Example:
+// Examples:
 //   price_cli --spot 100 --strike 105 --rate 0.05 --vol 0.2 --expiry 1.0 \
 //             --type call --method bs
+//   price_cli --spot 100 --strike 105 --rate 0.05 --implied-vol 8.02 \
+//             --expiry 1.0 --type call --method bs
 //
-// Prints the price (by the chosen method), the analytical Black-Scholes
-// Greeks, and -- for Monte Carlo -- the standard error and 95% confidence
-// interval. The argument parser is hand-rolled; there are no external
-// dependencies beyond the engine itself.
+// The tool runs in one of two directions. Given --vol it prices the option;
+// given --implied-vol it takes a market price and solves for the volatility
+// that reproduces it. Either way it prints the analytical Black-Scholes
+// Greeks -- in the inversion case, at the volatility that was recovered --
+// plus, for Monte Carlo, the standard error and 95% confidence interval.
+// The argument parser is hand-rolled; there are no external dependencies
+// beyond the engine itself.
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -20,6 +26,7 @@
 #include "opt/binomial_tree.hpp"
 #include "opt/black_scholes.hpp"
 #include "opt/greeks.hpp"
+#include "opt/implied_volatility.hpp"
 #include "opt/market_data.hpp"
 #include "opt/monte_carlo.hpp"
 #include "opt/option.hpp"
@@ -42,6 +49,11 @@ struct Config {
     std::size_t paths = 100'000;          // Monte Carlo
     std::uint64_t seed = 0x5DEECE66DULL;  // Monte Carlo
     opt::VarianceReduction variates = opt::VarianceReduction::AntitheticAndControl;
+
+    // Inversion mode: solve for the volatility reproducing target_price
+    // instead of pricing at a volatility supplied on the command line.
+    bool solve_iv = false;
+    double target_price = 0.0;
 };
 
 void print_usage(std::ostream& os) {
@@ -50,8 +62,11 @@ void print_usage(std::ostream& os) {
           "  --spot <S>        underlying spot price (> 0)\n"
           "  --strike <K>      strike price (> 0)\n"
           "  --rate <r>        continuously-compounded risk-free rate\n"
-          "  --vol <sigma>     annualised volatility (>= 0)\n"
-          "  --expiry <T>      time to expiry in years (>= 0)\n\n"
+          "  --expiry <T>      time to expiry in years (>= 0)\n"
+          "  and exactly one of:\n"
+          "  --vol <sigma>     annualised volatility (>= 0): prices the option\n"
+          "  --implied-vol <P> market price (>= 0): solves for the volatility\n"
+          "                    reproducing it (--method bs or tree; needs T > 0)\n\n"
           "Optional:\n"
           "  --dividend <q>    continuous dividend yield (default 0)\n"
           "  --type <call|put>            (default call)\n"
@@ -139,6 +154,53 @@ void print_usage(std::ostream& os) {
     throw std::runtime_error("--variates must be none|antithetic|control|both, got '" + v + "'");
 }
 
+// Rules that need the whole command line rather than one flag, so they run once
+// parsing is done. Throws std::runtime_error describing the first violation.
+void validate(const Config& cfg, bool have_required, bool have_vol) {
+    if (!have_required) {
+        throw std::runtime_error("missing required flag(s); need --spot --strike --rate --expiry");
+    }
+    // The volatility is either an input or the unknown, never both.
+    if (have_vol && cfg.solve_iv) {
+        throw std::runtime_error(
+            "--vol and --implied-vol are mutually exclusive: --implied-vol solves "
+            "for the volatility, so there is nothing to supply");
+    }
+    if (!have_vol && !cfg.solve_iv) {
+        throw std::runtime_error("need either --vol (to price) or --implied-vol (to invert)");
+    }
+    if (cfg.solve_iv) {
+        if (cfg.method == Method::MonteCarlo) {
+            throw std::runtime_error(
+                "--implied-vol needs --method bs or tree: a Monte Carlo price carries "
+                "sampling noise, so inverting it would solve for the noise as well");
+        }
+        if (cfg.target_price < 0.0) {
+            throw std::runtime_error("--implied-vol must be >= 0");
+        }
+        if (cfg.expiry <= 0.0) {
+            throw std::runtime_error(
+                "--implied-vol needs --expiry > 0: at expiry the price is the payoff and "
+                "carries no volatility information");
+        }
+    }
+    if (cfg.spot <= 0.0) {
+        throw std::runtime_error("--spot must be > 0");
+    }
+    if (cfg.strike <= 0.0) {
+        throw std::runtime_error("--strike must be > 0");
+    }
+    if (cfg.volatility < 0.0) {
+        throw std::runtime_error("--vol must be >= 0");
+    }
+    if (cfg.expiry < 0.0) {
+        throw std::runtime_error("--expiry must be >= 0");
+    }
+    if (cfg.method == Method::Tree && cfg.steps < 1) {
+        throw std::runtime_error("--steps must be >= 1");
+    }
+}
+
 // Parses argv into a Config. Returns false (after printing usage) when --help
 // was requested; throws std::runtime_error on a malformed command line.
 [[nodiscard]] bool parse_args(int argc, char** argv, Config& cfg) {
@@ -173,6 +235,9 @@ void print_usage(std::ostream& os) {
         } else if (flag == "--vol") {
             cfg.volatility = to_double(flag, value());
             have_vol = true;
+        } else if (flag == "--implied-vol") {
+            cfg.target_price = to_double(flag, value());
+            cfg.solve_iv = true;
         } else if (flag == "--expiry") {
             cfg.expiry = to_double(flag, value());
             have_expiry = true;
@@ -197,25 +262,7 @@ void print_usage(std::ostream& os) {
         }
     }
 
-    if (!(have_spot && have_strike && have_rate && have_vol && have_expiry)) {
-        throw std::runtime_error(
-            "missing required flag(s); need --spot --strike --rate --vol --expiry");
-    }
-    if (cfg.spot <= 0.0) {
-        throw std::runtime_error("--spot must be > 0");
-    }
-    if (cfg.strike <= 0.0) {
-        throw std::runtime_error("--strike must be > 0");
-    }
-    if (cfg.volatility < 0.0) {
-        throw std::runtime_error("--vol must be >= 0");
-    }
-    if (cfg.expiry < 0.0) {
-        throw std::runtime_error("--expiry must be >= 0");
-    }
-    if (cfg.method == Method::Tree && cfg.steps < 1) {
-        throw std::runtime_error("--steps must be >= 1");
-    }
+    validate(cfg, have_spot && have_strike && have_rate && have_expiry, have_vol);
     return true;
 }
 
@@ -259,23 +306,119 @@ const char* variates_name(opt::VarianceReduction v) {
     return "unknown";
 }
 
-void run(const Config& cfg) {
-    const opt::MarketData market{cfg.spot, cfg.rate, cfg.dividend, cfg.volatility};
-    const opt::Greeks greeks = opt::bs_greeks(market, cfg.strike, cfg.expiry, cfg.type);
+// Inverts the quote under the model the caller chose. The lattice path exists
+// because a listed equity option is American: inverting its quote with
+// Black-Scholes prices away the early-exercise premium and calls the difference
+// volatility.
+[[nodiscard]] opt::IvResult solve_implied_volatility(const Config& cfg,
+                                                     const opt::MarketData& market) {
+    if (cfg.method == Method::Tree) {
+        const std::unique_ptr<opt::Option> option = make_option(cfg);
+        return opt::implied_volatility_binomial(cfg.target_price, market, *option, cfg.steps);
+    }
+    return opt::implied_volatility(cfg.target_price, market, cfg.strike, cfg.expiry, cfg.type);
+}
+
+// A failed inversion is nearly always a statement about the quote rather than
+// about the solver, so say which.
+const char* iv_diagnosis(opt::IvStatus status) {
+    switch (status) {
+        case opt::IvStatus::Converged:
+            return "";
+        case opt::IvStatus::BelowIntrinsic:
+            return "the quote is below the option's intrinsic value, so no volatility "
+                   "reproduces it -- check the spot, rate and dividend used";
+        case opt::IvStatus::AboveUpperBound:
+            return "the quote exceeds what any volatility can produce (the price is bounded "
+                   "by the discounted forward), so it is not an arbitrage-free quote";
+        case opt::IvStatus::MaxIterations:
+            return "the solver ran out of iterations, which on a well-posed quote means the "
+                   "tolerances are below what double precision can deliver here";
+        case opt::IvStatus::InvalidInput:
+            return "the inputs are not a well-posed inversion problem";
+        case opt::IvStatus::BelowLatticeResolution:
+            return "the quote sits between the zero-volatility price and the cheapest price "
+                   "this lattice can produce, so it implies no volatility this tree can "
+                   "represent -- it is indistinguishable from a deterministic forward here";
+    }
+    return "unknown failure";
+}
+
+// Prints the recovered volatility together with the conditioning of the
+// inversion. The vega matters as much as the answer: it converts a quote error
+// into a volatility error, and where it collapses the number is arithmetic
+// without economics.
+void print_implied_volatility(const opt::IvResult& iv) {
+    std::cout << "Implied vol   : " << iv.volatility << '\n'
+              << "  Vega        : " << iv.vega << "   (per 1.00 vol)\n"
+              << "  Residual    : " << iv.price_residual << "   (model - market)\n"
+              << "  Solver      : " << opt::to_string(iv.method) << ", " << iv.iterations
+              << " iterations\n";
+
+    constexpr double negligible_vega = 1e-12;
+    if (!(std::abs(iv.vega) > negligible_vega)) {
+        std::cout << "  WARNING     : the price is flat in volatility here (vega ~ 0), so the\n"
+                     "                implied volatility is not identified -- every volatility\n"
+                     "                in a whole interval reproduces this quote. Discard it.\n";
+        return;
+    }
+    // One cent of quote error, expressed in vol points, is the form a trader
+    // reads this in.
+    const double vol_points_per_cent = 100.0 * 0.01 / std::abs(iv.vega);
+    std::cout << "  Sensitivity : a 0.01 quote error moves the implied vol by "
+              << vol_points_per_cent << " vol points\n";
+}
+
+[[nodiscard]] int run(const Config& cfg) {
+    opt::MarketData market{cfg.spot, cfg.rate, cfg.dividend, cfg.volatility};
 
     std::cout.setf(std::ios::fixed);
     std::cout.precision(6);
 
+    opt::IvResult iv{};
+    if (cfg.solve_iv) {
+        iv = solve_implied_volatility(cfg, market);
+        if (!iv.converged()) {
+            std::cerr << "error: no implied volatility (" << opt::to_string(iv.status)
+                      << "): " << iv_diagnosis(iv.status) << '\n';
+            return 1;
+        }
+        // Everything downstream -- the Greeks above all -- is reported at the
+        // volatility that was recovered, not at the zero it started from.
+        market.volatility = iv.volatility;
+    }
+
+    const opt::Greeks greeks = opt::bs_greeks(market, cfg.strike, cfg.expiry, cfg.type);
+
     std::cout << "Inputs\n"
-              << "  Method      : " << method_name(cfg.method) << '\n'
+              << "  Method      : " << method_name(cfg.method)
+              << (cfg.solve_iv ? "  [solving for volatility]" : "") << '\n'
               << "  Type        : " << (cfg.type == opt::OptionType::Call ? "Call" : "Put") << " ("
               << (cfg.exercise == opt::Exercise::European ? "European" : "American") << ")\n"
               << "  Spot        : " << cfg.spot << '\n'
               << "  Strike      : " << cfg.strike << '\n'
               << "  Rate        : " << cfg.rate << '\n'
-              << "  Dividend    : " << cfg.dividend << '\n'
-              << "  Volatility  : " << cfg.volatility << '\n'
-              << "  Expiry      : " << cfg.expiry << " years\n\n";
+              << "  Dividend    : " << cfg.dividend << '\n';
+    if (cfg.solve_iv) {
+        std::cout << "  Market price: " << cfg.target_price << '\n';
+    } else {
+        std::cout << "  Volatility  : " << cfg.volatility << '\n';
+    }
+    std::cout << "  Expiry      : " << cfg.expiry << " years\n\n";
+
+    if (cfg.solve_iv) {
+        print_implied_volatility(iv);
+        if (cfg.method == Method::Tree) {
+            std::cout << "  (" << cfg.steps << " steps)\n";
+        }
+        std::cout << "\nGreeks (Black-Scholes analytical, at the implied volatility):\n"
+                  << "  Delta       : " << greeks.delta << '\n'
+                  << "  Gamma       : " << greeks.gamma << '\n'
+                  << "  Vega        : " << greeks.vega << "   (per 1.00 vol)\n"
+                  << "  Theta       : " << greeks.theta << "   (per year)\n"
+                  << "  Rho         : " << greeks.rho << "   (per 1.00 rate)\n";
+        return 0;
+    }
 
     std::cout << "Price         : ";
     if (cfg.method == Method::BlackScholes) {
@@ -308,6 +451,7 @@ void run(const Config& cfg) {
               << "  Vega        : " << greeks.vega << "   (per 1.00 vol)\n"
               << "  Theta       : " << greeks.theta << "   (per year)\n"
               << "  Rho         : " << greeks.rho << "   (per 1.00 rate)\n";
+    return 0;
 }
 
 }  // namespace
@@ -318,11 +462,10 @@ int main(int argc, char** argv) {
         if (!parse_args(argc, argv, cfg)) {
             return 0;  // --help
         }
-        run(cfg);
+        return run(cfg);
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << "\n\n";
         print_usage(std::cerr);
         return 1;
     }
-    return 0;
 }
